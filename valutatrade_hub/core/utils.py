@@ -1,125 +1,72 @@
-import json
-from pathlib import Path
-from typing import Any
+from valutatrade_hub.infra.database import DatabaseManager
+
+database = DatabaseManager()
 
 
-# Корневая папка проекта
-BASE_DIR = Path(__file__).resolve().parents[2]
-DATA_DIR = BASE_DIR / "data"
-
-USERS_FILE = DATA_DIR / "users.json"
-PORTFOLIOS_FILE = DATA_DIR / "portfolios.json"
-RATES_FILE = DATA_DIR / "rates.json"
-
-
-
-import json
-from pathlib import Path
-from typing import Any
-
-
-# Корневая папка проекта
-BASE_DIR = Path(__file__).resolve().parents[2]
-DATA_DIR = BASE_DIR / "data"
-
-USERS_FILE = DATA_DIR / "users.json"
-PORTFOLIOS_FILE = DATA_DIR / "portfolios.json"
-RATES_FILE = DATA_DIR / "rates.json"
-
-
-def save_json(path: Path, data: Any) -> None:
+def load_users():
     """
-    Сохраняет данные в JSON-файл.
-
-    Перед записью создаёт родительскую директорию.
-    Использует временный файл, чтобы снизить риск повреждения
-    данных при прерывании записи.
+    Загружает список зарегистрированных пользователей из JSON-файла.
+    Если файл отсутствует, возвращает пустой список.
+    Returns:
+        list: Список пользователей.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    temporary_path = path.with_suffix(path.suffix + ".tmp")
-
-    with temporary_path.open("w", encoding="utf-8") as file:
-        json.dump(data, file, ensure_ascii=False, indent=2)
-
-    temporary_path.replace(path)
+    return database.read("users")
 
 
-def load_json(path: Path, default: Any) -> Any:
+def save_users(users):
     """
-    Загружает данные из JSON-файла.
-
-    Если файл отсутствует, создаёт его с начальными данными.
-    Поддерживает UTF-8 с BOM.
+    Сохраняет список пользователей в JSON-файл.
+    Args:
+        users: Список пользователей для сохранения.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    if not path.exists():
-        save_json(path, default)
-        return default
-
-    try:
-        with path.open("r", encoding="utf-8-sig") as file:
-            return json.load(file)
-    except json.JSONDecodeError as exc:
-        raise ValueError(
-            f"Файл {path.name} содержит некорректный JSON"
-        ) from exc
+    database.write("users", users)
 
 
-def load_users() -> list[dict]:
-    """Загружает список пользователей."""
-    data = load_json(USERS_FILE, [])
-
-    if not isinstance(data, list):
-        raise ValueError("Файл users.json должен содержать список")
-
-    return data
-
-
-def save_users(users: list[dict]) -> None:
-    """Сохраняет список пользователей."""
-    save_json(USERS_FILE, users)
-
-
-def load_portfolios() -> list[dict]:
-    """Загружает список портфелей пользователей."""
-    data = load_json(PORTFOLIOS_FILE, [])
-
-    if not isinstance(data, list):
-        raise ValueError("Файл portfolios.json должен содержать список")
-
-    return data
-
-
-def save_portfolios(portfolios: list[dict]) -> None:
-    """Сохраняет список портфелей пользователей."""
-    save_json(PORTFOLIOS_FILE, portfolios)
-
-
-def load_rates() -> dict:
+def load_portfolios():
     """
-    Загружает курсы валют и метаданные.
-
-    При первом запуске создаёт файл с базовым курсом USD.
+    Загружает список валютных портфелей из JSON-файла.
+    Если файл отсутствует, возвращает пустой список.
+    Returns:
+        list: Список сохранённых портфелей.
     """
-    default_rates = {
-        "USD": 1.0,
-        "source": "local",
-        "last_refresh": None,
-    }
-
-    data = load_json(RATES_FILE, default_rates)
-
-    if not isinstance(data, dict):
-        raise ValueError("Файл rates.json должен содержать словарь")
-
-    return data
+    return database.read("portfolios")
 
 
-def save_rates(rates: dict) -> None:
-    """Сохраняет курсы валют и метаданные."""
+def save_portfolios(portfolios):
+    """
+    Сохраняет список валютных портфелей в JSON-файл.
+    Args:
+        portfolios: Список портфелей для сохранения.
+    """
+    database.write("portfolios", portfolios)
+
+
+def load_rates():
+    """
+    Загружает курсы валют и метаданные из JSON-файла.
+    Если файл отсутствует, создаёт его с начальными данными,
+    содержащими базовый курс USD и информацию об источнике.
+    Дополнительно проверяет, что загруженные данные представлены
+    в виде словаря.
+    Returns:
+        dict: Словарь с курсами валют, источником данных
+            и временем последнего обновления.
+    Raises:
+        ValueError: Если содержимое файла не является словарём
+            или содержит некорректный JSON.
+    """
+    rates = database.read("rates")
+
     if not isinstance(rates, dict):
-        raise ValueError("Курсы валют должны быть представлены словарём")
+        raise ValueError("Некорректный формат rates.json")
 
-    save_json(RATES_FILE, rates)
+    return rates
+
+
+def save_rates(rates):
+    """
+    Сохраняет курсы валют и метаданные в JSON-файл.
+    Args:
+        rates: Словарь с курсами валют и дополнительной информацией.
+    """
+    database.write("rates", rates)

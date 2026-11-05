@@ -1,9 +1,10 @@
 import hashlib
 import hmac
 import secrets
-
-
 from datetime import datetime
+
+from valutatrade_hub.core.exceptions import InsufficientFundsError
+
 
 class User:
     """
@@ -18,6 +19,7 @@ class User:
         _salt (str): Соль, используемая при хешировании пароля.
         _registration_date (datetime): Дата и время регистрации.
     """
+
     def __init__(
         self,
         user_id: int,
@@ -49,7 +51,7 @@ class User:
     @property
     def username(self):
         """Возвращает имя пользователя."""
-        return self._username 
+        return self._username
 
     @username.setter
     def username(self, value):
@@ -89,9 +91,7 @@ class User:
         Returns:
             str: Шестнадцатеричное представление хеша пароля.
         """
-        return hashlib.sha256(
-            (password + salt).encode("utf-8")
-        ).hexdigest()
+        return hashlib.sha256((password + salt).encode("utf-8")).hexdigest()
 
     @classmethod
     def create(cls, user_id: int, username: str, password: str):
@@ -139,9 +139,7 @@ class User:
             raise ValueError("Пароль должен быть не короче 4 символов")
 
         self._salt = secrets.token_hex(16)
-        self._hashed_password = self.hash_password(
-            new_password, self._salt
-        )
+        self._hashed_password = self.hash_password(new_password, self._salt)
 
     def get_user_info(self) -> dict:
         """
@@ -167,6 +165,7 @@ class Wallet:
         _currency_code (str): Код валюты кошелька.
         _balance (float): Текущий баланс кошелька.
     """
+
     def __init__(self, currency_code: str, balance: float = 0.0):
         """
         Инициализирует кошелёк с указанной валютой и начальным балансом.
@@ -213,9 +212,7 @@ class Wallet:
         Raises:
             ValueError: Если сумма не является положительным числом.
         """
-        if (not isinstance(amount, (int, float))
-            or amount <= 0
-        ):
+        if not isinstance(amount, (int, float)) or amount <= 0:
             raise ValueError("'amount' должен быть положительным числом")
 
     def deposit(self, amount: float):
@@ -242,11 +239,12 @@ class Wallet:
         self._validate_amount(amount)
 
         if amount > self.balance:
-            raise ValueError(
-                f"Недостаточно средств: доступно {self.balance} "
-                f"{self.currency_code}, требуется {amount} {self.currency_code}"
+            raise InsufficientFundsError(
+                available=self.balance,
+                required=amount,
+                code=self.currency_code,
             )
-        
+
         self.balance = self._balance - amount
 
     def get_balance_info(self) -> dict:
@@ -270,6 +268,7 @@ EXCHANGE_RATES = {
     "RUB": 0.011,
 }
 
+
 class Portfolio:
     """
     Представляет валютный портфель пользователя.
@@ -282,6 +281,7 @@ class Portfolio:
         _wallets (dict[str, Wallet]): Словарь валютных кошельков,
             где ключом является код валюты.
     """
+
     def __init__(
         self,
         user_id: int,
@@ -383,31 +383,23 @@ class Portfolio:
         base = base_currency.strip().upper()
 
         if base not in rates:
-            raise ValueError(
-                f"Неизвестная базовая валюта '{base}'"
-            )
+            raise ValueError(f"Неизвестная базовая валюта '{base}'")
 
         base_rate = rates[base]
 
         if base_rate <= 0:
-            raise ValueError(
-                f"Некорректный курс базовой валюты '{base}'"
-            )
+            raise ValueError(f"Некорректный курс базовой валюты '{base}'")
 
         total = 0.0
 
         for code, wallet in self._wallets.items():
             if code not in rates:
-                raise ValueError(
-                    f"Нет курса для валюты '{code}'"
-                )
+                raise ValueError(f"Нет курса для валюты '{code}'")
 
             rate = rates[code]
 
             if rate <= 0:
-                raise ValueError(
-                    f"Некорректный курс валюты '{code}'"
-                )
+                raise ValueError(f"Некорректный курс валюты '{code}'")
 
             total += wallet.balance * rate / base_rate
 

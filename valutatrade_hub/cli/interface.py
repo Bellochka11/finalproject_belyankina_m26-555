@@ -3,10 +3,15 @@ import shlex
 
 # from prettytable import PrettyTable
 from valutatrade_hub.core import usecases
+from valutatrade_hub.core.exceptions import (
+    ApiRequestError,
+    CurrencyNotFoundError,
+    InsufficientFundsError,
+)
 from valutatrade_hub.core.models import User
 
-
 current_user: User | None = None
+
 
 def build_parser():
     """
@@ -47,6 +52,18 @@ def build_parser():
     rate = commands.add_parser("get-rate")
     rate.add_argument("--from", dest="from_currency", required=True)
     rate.add_argument("--to", dest="to_currency", required=True)
+
+    update_rates = commands.add_parser("update-rates")
+    update_rates.add_argument(
+        "--source",
+        choices=["all", "exchangerate", "coingecko"],
+        default="all",
+    )
+
+    show_rates = commands.add_parser("show-rates")
+    show_rates.add_argument("--currency")
+    show_rates.add_argument("--top", type=int)
+    show_rates.add_argument("--base", default="USD")
 
     commands.add_parser("change_password")
     commands.add_parser("help")
@@ -123,17 +140,13 @@ def execute(args):
             args.base,
         )
 
-        print(
-            f"Портфель пользователя '{data['username']}' "
-            f"(база: {data['base']}):"
-        )
+        print(f"Портфель пользователя '{data['username']}' (база: {data['base']}):")
 
         if not data["wallets"]:
             print("Портфель пуст")
             return
 
-        print(f"{'Валюта':<10} {'Баланс':>18} "
-          f"{'Стоимость (' + data['base'] + ')':>22}")
+        print(f"{'Валюта':<10} {'Баланс':>18} {'Стоимость (' + data['base'] + ')':>22}")
         for item in data["wallets"]:
             balance = f"{item['balance']:.8f}".rstrip("0").rstrip(".")
             value = f"{item['value']:.2f}"
@@ -226,14 +239,16 @@ def execute(args):
                 f"{result['old_balance']:.4f} → стало "
                 f"{result['balance']:.4f}"
             )
-            print(
-                f"Оценочная стоимость покупки: "
-                f"{result['cost']:,.2f} USD"
-            )
+            print(f"Оценочная стоимость покупки: {result['cost']:,.2f} USD")
+        except CurrencyNotFoundError as exc:
+            print(f"Ошибка: {exc}")
+        except InsufficientFundsError as exc:
+            print(f"Недостаточно средств: {exc}")
+        except ApiRequestError as exc:
+            print(f"Не удалось получить актуальный курс: {exc}")
         except ValueError as exc:
             print(f"Не удалось выполнить покупку: {exc}")
 
-    
     elif args.command == "sell":
         if current_user is None:
             print("Сначала выполните login")
@@ -256,33 +271,35 @@ def execute(args):
                 f"{result['old_balance']:.4f} → стало "
                 f"{result['balance']:.4f}"
             )
-            print(
-                f"Оценочная выручка: "
-                f"{result['revenue']:,.2f} USD"
-            )
+            print(f"Оценочная выручка: {result['revenue']:,.2f} USD")
+        except CurrencyNotFoundError as exc:
+            print(f"Ошибка: {exc}")
+        except InsufficientFundsError as exc:
+            print(f"Недостаточно средств: {exc}")
+        except ApiRequestError as exc:
+            print(f"Не удалось получить актуальный курс: {exc}")
         except ValueError as exc:
             print(f"Не удалось выполнить продажу: {exc}")
 
-
-    elif args.command == "get-rate": 
+    elif args.command == "get-rate":
         try:
             result = usecases.get_rate(
                 args.from_currency,
                 args.to_currency,
             )
-            print(
-                f"Курс {result['from']}→{result['to']}: "
-                f"{result['rate']:.8f}"
-            )
+            print(f"Курс {result['from']}→{result['to']}: {result['rate']:.8f}")
             print(
                 f"Обратный курс {result['to']}→{result['from']}: "
                 f"{result['reverse_rate']:.8f}"
             )
             print(f"Время кеша: {result['updated_at']}")
+        except CurrencyNotFoundError as exc:
+            print(f"Неизвестная валюта: {exc}")
+        except ApiRequestError as exc:
+            print(f"Ошибка получения курса валют: {exc}")
         except ValueError as exc:
             print(f"Некорректные параметры: {exc}")
 
-    
     elif args.command == "change_password":
         if current_user is None:
             print("Сначала войдите в систему.")
@@ -325,6 +342,16 @@ def run():
             if execute(args) is False:
                 print("До свидания!")
                 break
+        except InsufficientFundsError as exc:
+            print(exc)
+
+        except CurrencyNotFoundError as exc:
+            print(exc)
+            print("Используйте get-rate для проверки поддерживаемых валют.")
+
+        except ApiRequestError as exc:
+            print(exc)
+            print("Повторите попытку позже или проверьте подключение к сети.")
 
         except SystemExit:
             continue
