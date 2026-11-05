@@ -14,6 +14,7 @@ from valutatrade_hub.core.utils import (
 )
 from valutatrade_hub.decorators import log_action
 from valutatrade_hub.infra.settings import SettingsLoader
+from valutatrade_hub.parser_service.updater import RatesUpdater
 
 # Загрузчик настроек приложения.
 settings = SettingsLoader()
@@ -49,19 +50,18 @@ def _is_cache_fresh(timestamp: str | None) -> bool:
     return now - updated_at < RATE_CACHE_TTL
 
 
-def _fetch_rates_from_parser() -> dict[str, float]:
+def _fetch_rates_from_parser() -> dict:
     """
-    Временно возвращает тестовые курсы валют относительно USD.
-    В дальнейшем будет заменена запросом через Parser Service.
+    Получает актуальные курсы валют через Parser Service.
+    Запускает обновление курсов из внешних API и загружает
+    сохранённые курсы из хранилища.
+    Returns:
+        Словарь с курсами валют относительно базовой валюты USD,
+        источником данных и временем последнего обновления.
     """
-    return {
-        "USD": 1.0,
-        "EUR": 1.08,
-        "RUB": 0.011,
-        "BTC": 59337.21,
-        "ETH": 3720.00,
-        "SOL": 145.50,
-    }
+    updater = RatesUpdater()
+    updater.run_update()
+    return updater.storage.load_current_rates()
 
 
 def _get_rates() -> dict[str, float]:

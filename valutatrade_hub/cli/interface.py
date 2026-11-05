@@ -1,7 +1,8 @@
 import argparse
 import shlex
 
-# from prettytable import PrettyTable
+from prettytable import PrettyTable
+
 from valutatrade_hub.core import usecases
 from valutatrade_hub.core.exceptions import (
     ApiRequestError,
@@ -9,6 +10,8 @@ from valutatrade_hub.core.exceptions import (
     InsufficientFundsError,
 )
 from valutatrade_hub.core.models import User
+from valutatrade_hub.parser_service.storage import RatesStorage
+from valutatrade_hub.parser_service.updater import RatesUpdater
 
 current_user: User | None = None
 
@@ -90,6 +93,13 @@ def print_help():
   buy --currency BTC --amount 0.05
   sell --currency BTC --amount 0.01
   get-rate --from EUR --to USD
+  update-rates
+  update-rates --source exchangerate
+  update-rates --source coingecko
+  show-rates --currency BTC
+  show-rates --top 2
+  show-rates --base EUR
+  show-rates
   help
   exit
 """)
@@ -140,82 +150,39 @@ def execute(args):
             args.base,
         )
 
-        print(f"Портфель пользователя '{data['username']}' (база: {data['base']}):")
+        print(f"\nПортфель пользователя '{data['username']}' (база: {data['base']}):")
 
         if not data["wallets"]:
             print("Портфель пуст")
             return
 
-        print(f"{'Валюта':<10} {'Баланс':>18} {'Стоимость (' + data['base'] + ')':>22}")
+        table = PrettyTable()
+
+        table.field_names = [
+            "Валюта",
+            "Баланс",
+            f"Стоимость ({data['base']})",
+        ]
+
+        table.align["Валюта"] = "l"
+        table.align["Баланс"] = "r"
+        table.align[f"Стоимость ({data['base']})"] = "r"
+
         for item in data["wallets"]:
             balance = f"{item['balance']:.8f}".rstrip("0").rstrip(".")
-            value = f"{item['value']:.2f}"
-            print(f"{item['currency']:<10} {balance:>18} {value:>22}")
-        print(f"\nИТОГО: {data['total']:.2f} {data['base']}")
+            value = f"{item['value']:,.2f}"
 
-        # table = PrettyTable()
-        # table.field_names = [
-        #     "Валюта", "Баланс", f"Стоимость ({data['base']})"
-        # ]
+            table.add_row(
+                [
+                    item["currency"],
+                    balance,
+                    value,
+                ]
+            )
 
-        # for item in data["wallets"]:
-        #     table.add_row([
-        #         item["currency"],
-        #         f"{item['balance']:.8f}".rstrip("0").rstrip("."),
-        #         f"{item['value']:.2f}",
-        #     ])
+        print(table)
 
-        # print(table)
-        # print(f"ИТОГО: {data['total']:.2f} {data['base']}")
-
-    # elif args.command == "show-portfolio":
-    #     if current_user is None:
-    #         print("Сначала выполните login")
-    #         return
-
-    #     data = usecases.show_portfolio(
-    #         current_user.user_id,
-    #         args.base,
-    #     )
-
-    #     print(
-    #         f"\nПортфель пользователя '{data['username']}' "
-    #         f"(база: {data['base']}):"
-    #     )
-
-    #     if not data["wallets"]:
-    #         print("Портфель пуст")
-    #         return
-
-    #     table = PrettyTable()
-
-    #     table.field_names = [
-    #         "Валюта",
-    #         "Баланс",
-    #         f"Стоимость ({data['base']})",
-    #     ]
-
-    #     table.align["Валюта"] = "l"
-    #     table.align["Баланс"] = "r"
-    #     table.align[f"Стоимость ({data['base']})"] = "r"
-
-    #     for item in data["wallets"]:
-    #         balance = (
-    #             f"{item['balance']:.8f}".rstrip("0").rstrip(".")
-    #         )
-    #         value = f"{item['value']:,.2f}"
-
-    #         table.add_row([
-    #             item["currency"],
-    #             balance,
-    #             value,
-    #         ])
-
-    #     print(table)
-
-    #     print(
-    #         f"\nИТОГО: {data['total']:,.2f} {data['base']}"
-    #     )
+        print(f"\nИТОГО: {data['total']:,.2f} {data['base']}")
 
     elif args.command == "buy":
         if current_user is None:
@@ -307,6 +274,115 @@ def execute(args):
         new_password = input("Введите новый пароль: ")
         usecases.change_password(current_user.user_id, new_password)
         print("Пароль успешно изменён.")
+
+    elif args.command == "update-rates":
+        try:
+            updater = RatesUpdater()
+            updater_rates = updater.run_update(source=args.source)
+            rates = RatesStorage().load_current_rates()
+
+            if updater.errors:
+                print(
+                    "Обновление завершено с ошибками. "
+                    f"Получено курсов: {len(updater_rates)}"
+                )
+                for error in updater.errors:
+                    print(f"Предупреждение: {error}")
+                print("Подробности ошибок доступны в сообщениях журнала.")
+
+            else:
+                print(f"Курсы успешно обновлены. Всего получено: {len(updater_rates)}")
+
+            print(f"Последнее обновление: {rates.get('last_refresh', 'нет данных')}")
+
+        except ApiRequestError as exc:
+            print(f"Ошибка обновления курсов: {exc}")
+
+    elif args.command == "show-rates":
+        storage = RatesStorage()
+        rates = storage.load_current_rates()
+
+        metadata = {"source", "last_refresh"}
+        currency_rates = {
+            currency: rate
+            for currency, rate in rates.items()
+            if currency not in metadata
+        }
+
+        if not currency_rates or set(currency_rates) == {"USD"}:
+            print(
+                "Локальный кеш курсов пуст. "
+                "Выполните 'update-rates', чтобы загрузить данные."
+            )
+            return
+
+        base = args.base.upper()
+        currency = args.currency.upper() if args.currency else None
+
+        if base not in currency_rates:
+            print(f"Курс для базовой валюты '{base}' не найден в кеше.")
+            return
+
+        base_rate = currency_rates[base]
+
+        if base_rate <= 0:
+            print(f"Некорректный курс базовой валюты '{base}'.")
+            return
+
+        currency_rates = {
+            code: rate / base_rate for code, rate in currency_rates.items()
+        }
+
+        if currency:
+            if currency not in currency_rates:
+                print(f"Курс для '{currency}' не найден в кеше.")
+                return
+
+            currency_rates = {currency: currency_rates[currency]}
+
+        if args.top is not None:
+            if args.top <= 0:
+                print("Параметр --top должен быть положительным числом.")
+                return
+
+            crypto_currencies = {"BTC", "ETH", "SOL"}
+
+            currency_rates = {
+                code: rate
+                for code, rate in currency_rates.items()
+                if code in crypto_currencies
+            }
+
+            currency_rates = dict(
+                sorted(
+                    currency_rates.items(),
+                    key=lambda item: item[1],
+                    reverse=True,
+                )[: args.top]
+            )
+        else:
+            currency_rates = dict(sorted(currency_rates.items()))
+
+        print(f"\nАктуальные курсы относительно {base}:")
+
+        table = PrettyTable()
+        table.field_names = ["Валюта", f"Курс ({base})"]
+
+        table.align["Валюта"] = "l"
+        table.align[f"Курс ({base})"] = "r"
+
+        for code, rate in currency_rates.items():
+            table.add_row(
+                [
+                    code,
+                    f"{rate:,.8f}",
+                ]
+            )
+
+        print(table)
+
+        print(f"\nИсточник: {rates.get('source', 'неизвестен')}")
+        print(f"Обновлено: {rates.get('last_refresh', 'нет данных')}")
 
     elif args.command == "help":
         print_help()
